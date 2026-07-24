@@ -67,6 +67,10 @@ struct AppState {
     antigravity_session_text: String,
     antigravity_weekly_percent: f64,
     antigravity_weekly_text: String,
+    minimax_session_percent: f64,
+    minimax_session_text: String,
+    minimax_weekly_percent: f64,
+    minimax_weekly_text: String,
     ollama_session_percent: f64,
     ollama_session_text: String,
     ollama_weekly_percent: f64,
@@ -74,6 +78,7 @@ struct AppState {
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
+    show_minimax: bool,
     show_ollama: bool,
 
     data: Option<AppUsageData>,
@@ -137,6 +142,7 @@ const IDM_LANG_SIMPLIFIED_CHINESE: u16 = 51;
 const IDM_MODEL_CLAUDE_CODE: u16 = 60;
 const IDM_MODEL_CODEX: u16 = 61;
 const IDM_MODEL_ANTIGRAVITY: u16 = 62;
+const IDM_MODEL_MINIMAX: u16 = 63;
 const IDM_MODEL_OLLAMA: u16 = 64;
 #[cfg(feature = "ollama-login-webview")]
 const IDM_LOGIN_OLLAMA: u16 = 65;
@@ -325,6 +331,8 @@ struct SettingsFile {
     show_codex: bool,
     #[serde(default = "default_show_antigravity")]
     show_antigravity: bool,
+    #[serde(default = "default_show_minimax")]
+    show_minimax: bool,
     #[serde(default = "default_show_ollama")]
     show_ollama: bool,
 }
@@ -341,6 +349,7 @@ impl Default for SettingsFile {
             show_claude_code: true,
             show_codex: false,
             show_antigravity: false,
+            show_minimax: false,
             show_ollama: false,
         }
     }
@@ -366,6 +375,10 @@ fn default_show_antigravity() -> bool {
     false
 }
 
+fn default_show_minimax() -> bool {
+    false
+}
+
 fn default_show_ollama() -> bool {
     false
 }
@@ -379,6 +392,7 @@ fn load_settings() -> SettingsFile {
     if !settings.show_claude_code
         && !settings.show_codex
         && !settings.show_antigravity
+        && !settings.show_minimax
         && !settings.show_ollama
     {
         settings.show_claude_code = true;
@@ -411,6 +425,7 @@ fn save_state_settings() {
             show_claude_code: s.show_claude_code,
             show_codex: s.show_codex,
             show_antigravity: s.show_antigravity,
+            show_minimax: s.show_minimax,
             show_ollama: s.show_ollama,
         });
     }
@@ -457,6 +472,18 @@ fn tray_icon_data_from_state() -> Vec<tray_icon::TrayIconData> {
                     ),
                 });
             }
+            if s.show_minimax {
+                icons.push(tray_icon::TrayIconData {
+                    kind: tray_icon::TrayIconKind::Antigravity,
+                    percent: Some(s.minimax_session_percent),
+                    tooltip: format!(
+                        "{} 5h: {} | 7d: {}",
+                        s.language.strings().minimax_model,
+                        s.minimax_session_text,
+                        s.minimax_weekly_text
+                    ),
+                });
+            }
             if s.show_ollama {
                 icons.push(tray_icon::TrayIconData {
                     kind: tray_icon::TrayIconKind::Antigravity,
@@ -492,6 +519,13 @@ fn tray_icon_data_from_state() -> Vec<tray_icon::TrayIconData> {
                     kind: tray_icon::TrayIconKind::Antigravity,
                     percent: None,
                     tooltip: s.language.strings().antigravity_window_title.to_string(),
+                });
+            }
+            if s.show_minimax {
+                icons.push(tray_icon::TrayIconData {
+                    kind: tray_icon::TrayIconKind::Antigravity,
+                    percent: None,
+                    tooltip: s.language.strings().minimax_window_title.to_string(),
                 });
             }
             if s.show_ollama {
@@ -711,6 +745,19 @@ fn refresh_usage_texts(state: &mut AppState) {
     } else if state.show_antigravity {
         state.antigravity_session_text = "!".to_string();
         state.antigravity_weekly_text = "!".to_string();
+    }
+
+    if let Some(minimax) = data.minimax.as_ref() {
+        state.minimax_session_text = poller::format_line(&minimax.session, strings);
+        state.minimax_weekly_text =
+            if minimax.weekly.resets_at.is_none() && minimax.weekly.percentage == 0.0 {
+                "--".to_string()
+            } else {
+                poller::format_line(&minimax.weekly, strings)
+            };
+    } else if state.show_minimax {
+        state.minimax_session_text = "!".to_string();
+        state.minimax_weekly_text = "!".to_string();
     }
 
     if let Some(ollama) = data.ollama.as_ref() {
@@ -1136,11 +1183,13 @@ fn active_model_count(
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
+    show_minimax: bool,
     show_ollama: bool,
 ) -> i32 {
     (show_claude_code as i32
         + show_codex as i32
         + show_antigravity as i32
+        + show_minimax as i32
         + show_ollama as i32)
         .max(1)
 }
@@ -1173,6 +1222,7 @@ fn total_widget_width_for_state(state: &AppState) -> i32 {
         state.show_claude_code,
         state.show_codex,
         state.show_antigravity,
+        state.show_minimax,
         state.show_ollama,
     ))
 }
@@ -1187,6 +1237,7 @@ fn total_widget_width() -> i32 {
                     s.show_claude_code,
                     s.show_codex,
                     s.show_antigravity,
+                    s.show_minimax,
                     s.show_ollama,
                 )
             })
@@ -1209,6 +1260,10 @@ fn codex_accent_color(is_dark: bool) -> Color {
 
 fn antigravity_accent_color() -> Color {
     Color::from_hex("#4285F4")
+}
+
+fn minimax_accent_color() -> Color {
+    Color::from_hex("#FF6B35")
 }
 
 fn ollama_accent_color() -> Color {
@@ -1236,6 +1291,14 @@ fn antigravity_usage_text_color(is_dark: bool) -> Color {
         Color::from_hex("#8AB4F8")
     } else {
         Color::from_hex("#1967D2")
+    }
+}
+
+fn minimax_usage_text_color(is_dark: bool) -> Color {
+    if is_dark {
+        Color::from_hex("#FF8C66")
+    } else {
+        Color::from_hex("#CC4A1A")
     }
 }
 
@@ -1326,6 +1389,7 @@ pub fn run() {
             settings.show_claude_code,
             settings.show_codex,
             settings.show_antigravity,
+            settings.show_minimax,
             settings.show_ollama,
         );
         let hwnd = CreateWindowExW(
@@ -1390,6 +1454,10 @@ pub fn run() {
                 antigravity_session_text: "--".to_string(),
                 antigravity_weekly_percent: 0.0,
                 antigravity_weekly_text: "--".to_string(),
+                minimax_session_percent: 0.0,
+                minimax_session_text: "--".to_string(),
+                minimax_weekly_percent: 0.0,
+                minimax_weekly_text: "--".to_string(),
                 ollama_session_percent: 0.0,
                 ollama_session_text: "--".to_string(),
                 ollama_weekly_percent: 0.0,
@@ -1397,6 +1465,7 @@ pub fn run() {
                 show_claude_code: settings.show_claude_code,
                 show_codex: settings.show_codex,
                 show_antigravity: settings.show_antigravity,
+                show_minimax: settings.show_minimax,
                 show_ollama: settings.show_ollama,
                 data: None,
                 poll_interval_ms: settings.poll_interval_ms,
@@ -1520,6 +1589,10 @@ fn render_layered() {
         antigravity_session_text,
         antigravity_weekly_pct,
         antigravity_weekly_text,
+        minimax_session_pct,
+        minimax_session_text,
+        minimax_weekly_pct,
+        minimax_weekly_text,
         ollama_session_pct,
         ollama_session_text,
         ollama_weekly_pct,
@@ -1527,6 +1600,7 @@ fn render_layered() {
         show_claude_code,
         show_codex,
         show_antigravity,
+        show_minimax,
         show_ollama,
     ) = {
         let state = lock_state();
@@ -1548,6 +1622,10 @@ fn render_layered() {
                 s.antigravity_session_text.clone(),
                 s.antigravity_weekly_percent,
                 s.antigravity_weekly_text.clone(),
+                s.minimax_session_percent,
+                s.minimax_session_text.clone(),
+                s.minimax_weekly_percent,
+                s.minimax_weekly_text.clone(),
                 s.ollama_session_percent,
                 s.ollama_session_text.clone(),
                 s.ollama_weekly_percent,
@@ -1555,6 +1633,7 @@ fn render_layered() {
                 s.show_claude_code,
                 s.show_codex,
                 s.show_antigravity,
+                s.show_minimax,
                 s.show_ollama,
             ),
             None => return,
@@ -1577,6 +1656,7 @@ fn render_layered() {
     let accent = claude_accent_color();
     let codex_accent = codex_accent_color(is_dark);
     let antigravity_accent = antigravity_accent_color();
+    let minimax_accent = minimax_accent_color();
     let ollama_accent = ollama_accent_color();
     let track = if is_dark {
         Color::from_hex("#444444")
@@ -1649,6 +1729,10 @@ fn render_layered() {
             &antigravity_session_text,
             antigravity_weekly_pct,
             &antigravity_weekly_text,
+            minimax_session_pct,
+            &minimax_session_text,
+            minimax_weekly_pct,
+            &minimax_weekly_text,
             ollama_session_pct,
             &ollama_session_text,
             ollama_weekly_pct,
@@ -1656,9 +1740,11 @@ fn render_layered() {
             show_claude_code,
             show_codex,
             show_antigravity,
+            show_minimax,
             show_ollama,
             &codex_accent,
             &antigravity_accent,
+            &minimax_accent,
             &ollama_accent,
         );
 
@@ -1731,6 +1817,10 @@ fn paint_content(
     antigravity_session_text: &str,
     antigravity_weekly_pct: f64,
     antigravity_weekly_text: &str,
+    minimax_session_pct: f64,
+    minimax_session_text: &str,
+    minimax_weekly_pct: f64,
+    minimax_weekly_text: &str,
     ollama_session_pct: f64,
     ollama_session_text: &str,
     ollama_weekly_pct: f64,
@@ -1738,9 +1828,11 @@ fn paint_content(
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
+    show_minimax: bool,
     show_ollama: bool,
     codex_accent: &Color,
     antigravity_accent: &Color,
+    minimax_accent: &Color,
     ollama_accent: &Color,
 ) {
     unsafe {
@@ -1831,15 +1923,19 @@ fn paint_content(
             codex_session_text,
             antigravity_session_pct,
             antigravity_session_text,
+            minimax_session_pct,
+            minimax_session_text,
             ollama_session_pct,
             ollama_session_text,
             show_claude_code,
             show_codex,
             show_antigravity,
+            show_minimax,
             show_ollama,
             accent,
             codex_accent,
             antigravity_accent,
+            minimax_accent,
             ollama_accent,
             track,
         );
@@ -1856,15 +1952,19 @@ fn paint_content(
             codex_weekly_text,
             antigravity_weekly_pct,
             antigravity_weekly_text,
+            minimax_weekly_pct,
+            minimax_weekly_text,
             ollama_weekly_pct,
             ollama_weekly_text,
             show_claude_code,
             show_codex,
             show_antigravity,
+            show_minimax,
             show_ollama,
             accent,
             codex_accent,
             antigravity_accent,
+            minimax_accent,
             ollama_accent,
             track,
         );
@@ -1880,6 +1980,7 @@ fn do_poll(send_hwnd: SendHwnd) {
         show_claude_code,
         show_codex,
         show_antigravity,
+        show_minimax,
         show_ollama,
     ) = {
         let state = lock_state();
@@ -1889,17 +1990,13 @@ fn do_poll(send_hwnd: SendHwnd) {
                 s.show_claude_code,
                 s.show_codex,
                 s.show_antigravity,
+                s.show_minimax,
                 s.show_ollama,
             ))
-            .unwrap_or((true, false, false, false))
+            .unwrap_or((true, false, false, false, false))
     };
 
-        match poller::poll(
-        show_claude_code,
-        show_codex,
-        show_antigravity,
-        show_ollama,
-    ) {
+    match poller::poll(show_claude_code, show_codex, show_antigravity, show_minimax, show_ollama) {
         Ok(data) => {
             let mut state = lock_state();
             if let Some(s) = state.as_mut() {
@@ -1923,6 +2020,13 @@ fn do_poll(send_hwnd: SendHwnd) {
                 } else if s.show_antigravity {
                     s.antigravity_session_percent = 0.0;
                     s.antigravity_weekly_percent = 0.0;
+                }
+                if let Some(minimax) = data.minimax.as_ref() {
+                    s.minimax_session_percent = minimax.session.percentage;
+                    s.minimax_weekly_percent = minimax.weekly.percentage;
+                } else if s.show_minimax {
+                    s.minimax_session_percent = 0.0;
+                    s.minimax_weekly_percent = 0.0;
                 }
                 if let Some(ollama) = data.ollama.as_ref() {
                     s.ollama_session_percent = ollama.session.percentage;
@@ -1966,6 +2070,7 @@ fn do_poll(send_hwnd: SendHwnd) {
                     if show_antigravity
                         && !show_claude_code
                         && !show_codex
+                        && !show_minimax
                         && !show_ollama =>
                 {
                     Some((
@@ -2005,6 +2110,8 @@ fn do_poll(send_hwnd: SendHwnd) {
                             s.codex_weekly_text = "!".to_string();
                             s.antigravity_session_text = "!".to_string();
                             s.antigravity_weekly_text = "!".to_string();
+                            s.minimax_session_text = "!".to_string();
+                            s.minimax_weekly_text = "!".to_string();
                             s.ollama_session_text = "!".to_string();
                             s.ollama_weekly_text = "!".to_string();
                             s.retry_count = s.retry_count.saturating_add(1);
@@ -2027,6 +2134,8 @@ fn do_poll(send_hwnd: SendHwnd) {
                             s.codex_weekly_text = "...".to_string();
                             s.antigravity_session_text = "...".to_string();
                             s.antigravity_weekly_text = "...".to_string();
+                            s.minimax_session_text = "...".to_string();
+                            s.minimax_weekly_text = "...".to_string();
                             s.ollama_session_text = "...".to_string();
                             s.ollama_weekly_text = "...".to_string();
                             s.retry_count = s.retry_count.saturating_add(1);
@@ -2745,6 +2854,7 @@ unsafe extern "system" fn wnd_proc(
                 IDM_MODEL_CLAUDE_CODE
                 | IDM_MODEL_CODEX
                 | IDM_MODEL_ANTIGRAVITY
+                | IDM_MODEL_MINIMAX
                 | IDM_MODEL_OLLAMA => {
                     {
                         let mut state = lock_state();
@@ -2753,6 +2863,7 @@ unsafe extern "system" fn wnd_proc(
                                 IDM_MODEL_CLAUDE_CODE => {
                                     if s.show_codex
                                         || s.show_antigravity
+                                        || s.show_minimax
                                         || s.show_ollama
                                         || !s.show_claude_code
                                     {
@@ -2762,6 +2873,7 @@ unsafe extern "system" fn wnd_proc(
                                 IDM_MODEL_CODEX => {
                                     if s.show_claude_code
                                         || s.show_antigravity
+                                        || s.show_minimax
                                         || s.show_ollama
                                         || !s.show_codex
                                     {
@@ -2771,16 +2883,28 @@ unsafe extern "system" fn wnd_proc(
                                 IDM_MODEL_ANTIGRAVITY => {
                                     if s.show_claude_code
                                         || s.show_codex
+                                        || s.show_minimax
                                         || s.show_ollama
                                         || !s.show_antigravity
                                     {
                                         s.show_antigravity = !s.show_antigravity;
                                     }
                                 }
+                                IDM_MODEL_MINIMAX => {
+                                    if s.show_claude_code
+                                        || s.show_codex
+                                        || s.show_antigravity
+                                        || s.show_ollama
+                                        || !s.show_minimax
+                                    {
+                                        s.show_minimax = !s.show_minimax;
+                                    }
+                                }
                                 IDM_MODEL_OLLAMA => {
                                     if s.show_claude_code
                                         || s.show_codex
                                         || s.show_antigravity
+                                        || s.show_minimax
                                         || !s.show_ollama
                                     {
                                         s.show_ollama = !s.show_ollama;
@@ -2794,6 +2918,8 @@ unsafe extern "system" fn wnd_proc(
                             s.codex_weekly_text = "...".to_string();
                             s.antigravity_session_text = "...".to_string();
                             s.antigravity_weekly_text = "...".to_string();
+                            s.minimax_session_text = "...".to_string();
+                            s.minimax_weekly_text = "...".to_string();
                             s.ollama_session_text = "...".to_string();
                             s.ollama_weekly_text = "...".to_string();
                         }
@@ -2904,6 +3030,7 @@ fn show_context_menu(hwnd: HWND) {
             show_claude_code,
             show_codex,
             show_antigravity,
+            show_minimax,
             show_ollama,
         ) = {
             let state = lock_state();
@@ -2919,6 +3046,7 @@ fn show_context_menu(hwnd: HWND) {
                     s.show_claude_code,
                     s.show_codex,
                     s.show_antigravity,
+                    s.show_minimax,
                     s.show_ollama,
                 ),
                 None => (
@@ -2930,6 +3058,7 @@ fn show_context_menu(hwnd: HWND) {
                     UpdateStatus::Idle,
                     true,
                     true,
+                    false,
                     false,
                     false,
                     false,
@@ -3017,6 +3146,19 @@ fn show_context_menu(hwnd: HWND) {
             antigravity_flags,
             IDM_MODEL_ANTIGRAVITY as usize,
             PCWSTR::from_raw(antigravity_model.as_ptr()),
+        );
+
+        let minimax_model = native_interop::wide_str(strings.minimax_model);
+        let minimax_flags = if show_minimax {
+            MF_CHECKED
+        } else {
+            MENU_ITEM_FLAGS(0)
+        };
+        let _ = AppendMenuW(
+            models_menu,
+            minimax_flags,
+            IDM_MODEL_MINIMAX as usize,
+            PCWSTR::from_raw(minimax_model.as_ptr()),
         );
 
         let ollama_model = native_interop::wide_str(strings.ollama_model);
@@ -3209,6 +3351,10 @@ fn paint(hdc: HDC, hwnd: HWND) {
         antigravity_session_text,
         antigravity_weekly_pct,
         antigravity_weekly_text,
+        minimax_session_pct,
+        minimax_session_text,
+        minimax_weekly_pct,
+        minimax_weekly_text,
         ollama_session_pct,
         ollama_session_text,
         ollama_weekly_pct,
@@ -3216,6 +3362,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
         show_claude_code,
         show_codex,
         show_antigravity,
+        show_minimax,
         show_ollama,
     ) = {
         let state = lock_state();
@@ -3235,6 +3382,10 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.antigravity_session_text.clone(),
                 s.antigravity_weekly_percent,
                 s.antigravity_weekly_text.clone(),
+                s.minimax_session_percent,
+                s.minimax_session_text.clone(),
+                s.minimax_weekly_percent,
+                s.minimax_weekly_text.clone(),
                 s.ollama_session_percent,
                 s.ollama_session_text.clone(),
                 s.ollama_weekly_percent,
@@ -3242,6 +3393,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.show_claude_code,
                 s.show_codex,
                 s.show_antigravity,
+                s.show_minimax,
                 s.show_ollama,
             ),
             None => return,
@@ -3251,6 +3403,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
     let accent = claude_accent_color();
     let codex_accent = codex_accent_color(is_dark);
     let antigravity_accent = antigravity_accent_color();
+    let minimax_accent = minimax_accent_color();
     let ollama_accent = ollama_accent_color();
     let track = if is_dark {
         Color::from_hex("#444444")
@@ -3304,6 +3457,10 @@ fn paint(hdc: HDC, hwnd: HWND) {
             &antigravity_session_text,
             antigravity_weekly_pct,
             &antigravity_weekly_text,
+            minimax_session_pct,
+            &minimax_session_text,
+            minimax_weekly_pct,
+            &minimax_weekly_text,
             ollama_session_pct,
             &ollama_session_text,
             ollama_weekly_pct,
@@ -3311,9 +3468,11 @@ fn paint(hdc: HDC, hwnd: HWND) {
             show_claude_code,
             show_codex,
             show_antigravity,
+            show_minimax,
             show_ollama,
             &codex_accent,
             &antigravity_accent,
+            &minimax_accent,
             &ollama_accent,
         );
 
@@ -3338,21 +3497,25 @@ fn draw_row(
     codex_text: &str,
     antigravity_percent: f64,
     antigravity_text: &str,
+    minimax_percent: f64,
+    minimax_text: &str,
     ollama_percent: f64,
     ollama_text: &str,
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
+    show_minimax: bool,
     show_ollama: bool,
     claude_accent: &Color,
     codex_accent: &Color,
     antigravity_accent: &Color,
+    minimax_accent: &Color,
     ollama_accent: &Color,
     track: &Color,
 ) {
     let seg_h = sc(SEGMENT_H);
     let active_models =
-        active_model_count(show_claude_code, show_codex, show_antigravity, show_ollama);
+        active_model_count(show_claude_code, show_codex, show_antigravity, show_minimax, show_ollama);
     let segment_count = row_bar_segment_count(active_models);
     let use_model_text_colors = active_models > 1;
     let claude_value_color = if use_model_text_colors {
@@ -3367,6 +3530,11 @@ fn draw_row(
     };
     let antigravity_value_color = if use_model_text_colors {
         antigravity_usage_text_color(is_dark)
+    } else {
+        *text_color
+    };
+    let minimax_value_color = if use_model_text_colors {
+        minimax_usage_text_color(is_dark)
     } else {
         *text_color
     };
@@ -3432,6 +3600,20 @@ fn draw_row(
                 antigravity_accent,
                 track,
                 &antigravity_value_color,
+            );
+            model_x += model_usage_width(segment_count) + sc(MODEL_RIGHT_MARGIN);
+        }
+        if show_minimax {
+            draw_usage_bar(
+                hdc,
+                model_x,
+                y,
+                segment_count,
+                minimax_percent,
+                minimax_text,
+                minimax_accent,
+                track,
+                &minimax_value_color,
             );
             model_x += model_usage_width(segment_count) + sc(MODEL_RIGHT_MARGIN);
         }

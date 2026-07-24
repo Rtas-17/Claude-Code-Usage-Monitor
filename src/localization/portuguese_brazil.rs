@@ -47,6 +47,8 @@ pub(super) const STRINGS: Strings = Strings {
     antigravity_token_expired_body: "Abra o Antigravity e entre novamente. Depois disso, atualize ou reinicie este aplicativo.",
     codex_window_title: "Monitor de uso do Codex",
     antigravity_window_title: "Monitor de uso de Antigravity",
+    minimax_model: "MiniMax",
     ollama_model: "Ollama",
+    minimax_window_title: "Monitor de uso do MiniMax",
     ollama_window_title: "Monitor de uso do Ollama",
 };

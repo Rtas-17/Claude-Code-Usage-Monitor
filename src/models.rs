@@ -17,8 +17,6 @@ pub struct AppUsageData {
     pub claude_code: Option<UsageData>,
     pub codex: Option<UsageData>,
     pub antigravity: Option<UsageData>,
-    /// Ollama Cloud plan-tier usage. Polled from ollama.com/settings
-    /// using the user's browser-captured session cookie. `None` when the
-    /// cookie is missing or the poll fails (e.g. session expired).
+    pub minimax: Option<UsageData>,
     pub ollama: Option<UsageData>,
 }
