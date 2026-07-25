@@ -176,6 +176,8 @@ pub struct Strings {
     pub show_widget: &'static str,
     pub session_window: &'static str,
     pub weekly_window: &'static str,
+    pub cursor_auto_window: &'static str,
+    pub cursor_api_window: &'static str,
     pub now: &'static str,
     pub day_suffix: &'static str,
     pub hour_suffix: &'static str,
@@ -190,8 +192,10 @@ pub struct Strings {
     pub codex_window_title: &'static str,
     pub antigravity_window_title: &'static str,
     pub minimax_model: &'static str,
+    pub cursor_model: &'static str,
     pub ollama_model: &'static str,
     pub minimax_window_title: &'static str,
+    pub cursor_window_title: &'static str,
     pub ollama_window_title: &'static str,
 }
 

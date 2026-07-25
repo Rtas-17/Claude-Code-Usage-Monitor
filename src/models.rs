@@ -18,5 +18,7 @@ pub struct AppUsageData {
     pub codex: Option<UsageData>,
     pub antigravity: Option<UsageData>,
     pub minimax: Option<UsageData>,
+    /// Cursor plan usage. Auto maps to `session`, API maps to `weekly`.
+    pub cursor: Option<UsageData>,
     pub ollama: Option<UsageData>,
 }

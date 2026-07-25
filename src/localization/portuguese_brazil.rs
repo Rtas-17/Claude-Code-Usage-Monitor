@@ -34,6 +34,8 @@ pub(super) const STRINGS: Strings = Strings {
     show_widget: "Exibir Widget",
     session_window: "5h",
     weekly_window: "7d",
+    cursor_auto_window: "Auto",
+    cursor_api_window: "API",
     now: "agora",
     day_suffix: "d",
     hour_suffix: "h",
@@ -48,7 +50,9 @@ pub(super) const STRINGS: Strings = Strings {
     codex_window_title: "Monitor de uso do Codex",
     antigravity_window_title: "Monitor de uso de Antigravity",
     minimax_model: "MiniMax",
+    cursor_model: "Cursor",
     ollama_model: "Ollama",
     minimax_window_title: "Monitor de uso do MiniMax",
+    cursor_window_title: "Monitor de uso do Cursor",
     ollama_window_title: "Monitor de uso do Ollama",
 };
