@@ -79,12 +79,16 @@ struct AppState {
     ollama_session_text: String,
     ollama_weekly_percent: f64,
     ollama_weekly_text: String,
+    fable_percent: f64,
+    fable_text: String,
+    fable_active: bool,
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
     show_minimax: bool,
     show_cursor: bool,
     show_ollama: bool,
+    show_fable: bool,
 
     data: Option<AppUsageData>,
 
@@ -152,6 +156,7 @@ const IDM_MODEL_CURSOR: u16 = 66;
 const IDM_MODEL_OLLAMA: u16 = 64;
 #[cfg(feature = "ollama-login-webview")]
 const IDM_LOGIN_OLLAMA: u16 = 65;
+const IDM_MODEL_FABLE: u16 = 67;
 
 const WM_DPICHANGED_MSG: u32 = 0x02E0;
 const WM_APP_UPDATE_CHECK_COMPLETE: u32 = WM_APP + 2;
@@ -343,6 +348,8 @@ struct SettingsFile {
     show_cursor: bool,
     #[serde(default = "default_show_ollama")]
     show_ollama: bool,
+    #[serde(default = "default_show_fable")]
+    show_fable: bool,
 }
 
 impl Default for SettingsFile {
@@ -360,6 +367,7 @@ impl Default for SettingsFile {
             show_minimax: false,
             show_cursor: false,
             show_ollama: false,
+            show_fable: true,
         }
     }
 }
@@ -394,6 +402,10 @@ fn default_show_cursor() -> bool {
 
 fn default_show_ollama() -> bool {
     false
+}
+
+fn default_show_fable() -> bool {
+    true
 }
 
 fn load_settings() -> SettingsFile {
@@ -442,6 +454,7 @@ fn save_state_settings() {
             show_minimax: s.show_minimax,
             show_cursor: s.show_cursor,
             show_ollama: s.show_ollama,
+            show_fable: s.show_fable,
         });
     }
 }
@@ -452,15 +465,21 @@ fn tray_icon_data_from_state() -> Vec<tray_icon::TrayIconData> {
         Some(s) if s.last_poll_ok => {
             let mut icons = Vec::new();
             if s.show_claude_code {
+                let claude_tooltip = format!(
+                    "{} 5h: {} | 7d: {}",
+                    s.language.strings().claude_code_model,
+                    s.session_text,
+                    s.weekly_text
+                );
+                let claude_tooltip = if s.fable_active && s.show_fable {
+                    format!("{claude_tooltip} | Fable 7d: {}", s.fable_text)
+                } else {
+                    claude_tooltip
+                };
                 icons.push(tray_icon::TrayIconData {
                     kind: tray_icon::TrayIconKind::Claude,
                     percent: Some(s.session_percent),
-                    tooltip: format!(
-                        "{} 5h: {} | 7d: {}",
-                        s.language.strings().claude_code_model,
-                        s.session_text,
-                        s.weekly_text
-                    ),
+                    tooltip: claude_tooltip,
                 });
             }
             if s.show_codex {
@@ -755,6 +774,9 @@ fn refresh_usage_texts(state: &mut AppState) {
     if let Some(claude_code) = data.claude_code.as_ref() {
         state.session_text = poller::format_line(&claude_code.session, strings);
         state.weekly_text = poller::format_line(&claude_code.weekly, strings);
+        if let Some(fable) = claude_code.fable.as_ref() {
+            state.fable_text = poller::format_line(fable, strings);
+        }
     } else if state.show_claude_code {
         state.session_text = "!".to_string();
         state.weekly_text = "!".to_string();
@@ -1246,11 +1268,19 @@ fn row_bar_segment_count(active_models: i32) -> i32 {
     }
 }
 
-fn total_widget_width_for(active_models: i32) -> i32 {
+fn total_widget_width_for(active_models: i32, fable_active: bool) -> i32 {
     let bar_segments = row_bar_segment_count(active_models);
     let model_width = (sc(SEGMENT_W) + sc(SEGMENT_GAP)) * bar_segments - sc(SEGMENT_GAP)
         + sc(BAR_RIGHT_MARGIN)
         + sc(TEXT_WIDTH);
+
+    // The Fable meter adds one extra bar to the weekly row only; reserve room
+    // for it so the widget is wide enough for its widest row.
+    let fable_extra = if fable_active {
+        model_width + sc(MODEL_RIGHT_MARGIN)
+    } else {
+        0
+    };
 
     sc(LEFT_DIVIDER_W)
         + sc(DIVIDER_RIGHT_MARGIN)
@@ -1258,38 +1288,45 @@ fn total_widget_width_for(active_models: i32) -> i32 {
         + sc(LABEL_RIGHT_MARGIN)
         + model_width * active_models
         + sc(MODEL_RIGHT_MARGIN) * (active_models - 1)
+        + fable_extra
         + sc(RIGHT_MARGIN)
 }
 
 fn total_widget_width_for_state(state: &AppState) -> i32 {
-    total_widget_width_for(active_model_count(
-        state.show_claude_code,
-        state.show_codex,
-        state.show_antigravity,
-        state.show_minimax,
-        state.show_cursor,
-        state.show_ollama,
-    ))
+    total_widget_width_for(
+        active_model_count(
+            state.show_claude_code,
+            state.show_codex,
+            state.show_antigravity,
+            state.show_minimax,
+            state.show_cursor,
+            state.show_ollama,
+        ),
+        state.fable_active && state.show_claude_code && state.show_fable,
+    )
 }
 
 fn total_widget_width() -> i32 {
-    let active_models = {
+    let (active_models, fable_active) = {
         let state = lock_state();
         state
             .as_ref()
             .map(|s| {
-                active_model_count(
-                    s.show_claude_code,
-                    s.show_codex,
-                    s.show_antigravity,
-                    s.show_minimax,
-                    s.show_cursor,
-                    s.show_ollama,
+                (
+                    active_model_count(
+                        s.show_claude_code,
+                        s.show_codex,
+                        s.show_antigravity,
+                        s.show_minimax,
+                        s.show_cursor,
+                        s.show_ollama,
+                    ),
+                    s.fable_active && s.show_claude_code && s.show_fable,
                 )
             })
-            .unwrap_or(1)
+            .unwrap_or((1, false))
     };
-    total_widget_width_for(active_models)
+    total_widget_width_for(active_models, fable_active)
 }
 
 fn claude_accent_color() -> Color {
@@ -1323,6 +1360,21 @@ fn cursor_accent_color(is_dark: bool) -> Color {
 
 fn ollama_accent_color() -> Color {
     Color::from_hex("#676BEC")
+}
+
+/// Distinct accent for the Fable weekly meter — a muted violet that reads on
+/// both the light and dark taskbar backgrounds and is clearly separable from
+/// the other provider accents.
+fn fable_accent_color() -> Color {
+    Color::from_hex("#7C6BB0")
+}
+
+fn fable_usage_text_color(is_dark: bool) -> Color {
+    if is_dark {
+        Color::from_hex("#B5A8E0")
+    } else {
+        Color::from_hex("#5B4B8A")
+    }
 }
 
 fn claude_usage_text_color(is_dark: bool) -> Color {
@@ -1463,7 +1515,7 @@ pub fn run() {
             WS_POPUP,
             0,
             0,
-            total_widget_width_for(initial_model_count),
+            total_widget_width_for(initial_model_count, false),
             sc(WIDGET_HEIGHT),
             HWND::default(),
             HMENU::default(),
@@ -1530,12 +1582,16 @@ pub fn run() {
                 ollama_session_text: "--".to_string(),
                 ollama_weekly_percent: 0.0,
                 ollama_weekly_text: "--".to_string(),
+                fable_percent: 0.0,
+                fable_text: "--".to_string(),
+                fable_active: false,
                 show_claude_code: settings.show_claude_code,
                 show_codex: settings.show_codex,
                 show_antigravity: settings.show_antigravity,
                 show_minimax: settings.show_minimax,
                 show_cursor: settings.show_cursor,
                 show_ollama: settings.show_ollama,
+                show_fable: settings.show_fable,
                 data: None,
                 poll_interval_ms: settings.poll_interval_ms,
                 retry_count: 0,
@@ -1670,6 +1726,9 @@ fn render_layered() {
         ollama_session_text,
         ollama_weekly_pct,
         ollama_weekly_text,
+        fable_pct,
+        fable_text,
+        fable_active,
         show_claude_code,
         show_codex,
         show_antigravity,
@@ -1708,6 +1767,9 @@ fn render_layered() {
                 s.ollama_session_text.clone(),
                 s.ollama_weekly_percent,
                 s.ollama_weekly_text.clone(),
+                s.fable_percent,
+                s.fable_text.clone(),
+                s.fable_active && s.show_fable,
                 s.show_claude_code,
                 s.show_codex,
                 s.show_antigravity,
@@ -1738,6 +1800,7 @@ fn render_layered() {
     let minimax_accent = minimax_accent_color();
     let cursor_accent = cursor_accent_color(is_dark);
     let ollama_accent = ollama_accent_color();
+    let fable_accent = fable_accent_color();
     let track = if is_dark {
         Color::from_hex("#444444")
     } else {
@@ -1821,6 +1884,9 @@ fn render_layered() {
             &ollama_session_text,
             ollama_weekly_pct,
             &ollama_weekly_text,
+            fable_pct,
+            &fable_text,
+            fable_active,
             show_claude_code,
             show_codex,
             show_antigravity,
@@ -1832,6 +1898,7 @@ fn render_layered() {
             &minimax_accent,
             &cursor_accent,
             &ollama_accent,
+            &fable_accent,
         );
 
         // Background pixels → alpha 1 (nearly invisible but still hittable for right-click).
@@ -1915,6 +1982,9 @@ fn paint_content(
     ollama_session_text: &str,
     ollama_weekly_pct: f64,
     ollama_weekly_text: &str,
+    fable_pct: f64,
+    fable_text: &str,
+    fable_active: bool,
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
@@ -1926,6 +1996,7 @@ fn paint_content(
     minimax_accent: &Color,
     cursor_accent: &Color,
     ollama_accent: &Color,
+    fable_accent: &Color,
 ) {
     unsafe {
         let client_rect = RECT {
@@ -2013,6 +2084,15 @@ fn paint_content(
             (strings.session_window, strings.weekly_window)
         };
 
+        // The Fable meter's bar lives in the weekly row; the session row shows a
+        // "Fable" heading above it so the extra bar is clearly labelled.
+        let fable_bar = if fable_active {
+            Some((fable_pct, fable_text, fable_accent))
+        } else {
+            None
+        };
+        let fable_label = if fable_active { Some("Fable") } else { None };
+
         draw_row(
             hdc,
             content_x,
@@ -2045,6 +2125,9 @@ fn paint_content(
             cursor_accent,
             ollama_accent,
             track,
+            // Session row has no Fable bar, only the heading label.
+            None,
+            fable_label,
         );
         draw_row(
             hdc,
@@ -2078,6 +2161,9 @@ fn paint_content(
             cursor_accent,
             ollama_accent,
             track,
+            fable_bar,
+            // Weekly row draws the Fable bar itself, no separate heading.
+            None,
         );
 
         SelectObject(hdc, old_font);
@@ -2116,9 +2202,16 @@ fn do_poll(send_hwnd: SendHwnd) {
                 if let Some(claude_code) = data.claude_code.as_ref() {
                     s.session_percent = claude_code.session.percentage;
                     s.weekly_percent = claude_code.weekly.percentage;
+                    if let Some(fable) = claude_code.fable.as_ref() {
+                        s.fable_percent = fable.percentage;
+                        s.fable_active = true;
+                    } else {
+                        s.fable_active = false;
+                    }
                 } else if s.show_claude_code {
                     s.session_percent = 0.0;
                     s.weekly_percent = 0.0;
+                    s.fable_active = false;
                 }
                 if let Some(codex) = data.codex.as_ref() {
                     s.codex_session_percent = codex.session.percentage;
@@ -2981,7 +3074,8 @@ unsafe extern "system" fn wnd_proc(
                 | IDM_MODEL_ANTIGRAVITY
                 | IDM_MODEL_MINIMAX
                 | IDM_MODEL_CURSOR
-                | IDM_MODEL_OLLAMA => {
+                | IDM_MODEL_OLLAMA
+                | IDM_MODEL_FABLE => {
                     {
                         let mut state = lock_state();
                         if let Some(s) = state.as_mut() {
@@ -3051,6 +3145,12 @@ unsafe extern "system" fn wnd_proc(
                                     {
                                         s.show_ollama = !s.show_ollama;
                                     }
+                                }
+                                // The Fable meter is an optional extra bar; it can
+                                // be toggled freely without the "at least one model"
+                                // constraint that applies to the providers above.
+                                IDM_MODEL_FABLE => {
+                                    s.show_fable = !s.show_fable;
                                 }
                                 _ => {}
                             }
@@ -3177,6 +3277,7 @@ fn show_context_menu(hwnd: HWND) {
             show_minimax,
             show_cursor,
             show_ollama,
+            show_fable,
         ) = {
             let state = lock_state();
             match state.as_ref() {
@@ -3194,6 +3295,7 @@ fn show_context_menu(hwnd: HWND) {
                     s.show_minimax,
                     s.show_cursor,
                     s.show_ollama,
+                    s.show_fable,
                 ),
                 None => (
                     POLL_15_MIN,
@@ -3209,6 +3311,7 @@ fn show_context_menu(hwnd: HWND) {
                     false,
                     false,
                     false,
+                    true,
                 ),
             }
         };
@@ -3333,6 +3436,23 @@ fn show_context_menu(hwnd: HWND) {
             IDM_MODEL_OLLAMA as usize,
             PCWSTR::from_raw(ollama_model.as_ptr()),
         );
+
+        // Fable is a Claude Code sub-meter, so its toggle is only meaningful
+        // (and only shown) when Claude Code itself is enabled.
+        if show_claude_code {
+            let fable_model = native_interop::wide_str("Fable");
+            let fable_flags = if show_fable {
+                MF_CHECKED
+            } else {
+                MENU_ITEM_FLAGS(0)
+            };
+            let _ = AppendMenuW(
+                models_menu,
+                fable_flags,
+                IDM_MODEL_FABLE as usize,
+                PCWSTR::from_raw(fable_model.as_ptr()),
+            );
+        }
 
         // "Log in to Ollama…" menu item — only built when the
         // `ollama-login-webview` feature is enabled (otherwise no wry/tao).
@@ -3523,6 +3643,9 @@ fn paint(hdc: HDC, hwnd: HWND) {
         ollama_session_text,
         ollama_weekly_pct,
         ollama_weekly_text,
+        fable_pct,
+        fable_text,
+        fable_active,
         show_claude_code,
         show_codex,
         show_antigravity,
@@ -3559,6 +3682,9 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.ollama_session_text.clone(),
                 s.ollama_weekly_percent,
                 s.ollama_weekly_text.clone(),
+                s.fable_percent,
+                s.fable_text.clone(),
+                s.fable_active && s.show_fable,
                 s.show_claude_code,
                 s.show_codex,
                 s.show_antigravity,
@@ -3576,6 +3702,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
     let minimax_accent = minimax_accent_color();
     let cursor_accent = cursor_accent_color(is_dark);
     let ollama_accent = ollama_accent_color();
+    let fable_accent = fable_accent_color();
     let track = if is_dark {
         Color::from_hex("#444444")
     } else {
@@ -3640,6 +3767,9 @@ fn paint(hdc: HDC, hwnd: HWND) {
             &ollama_session_text,
             ollama_weekly_pct,
             &ollama_weekly_text,
+            fable_pct,
+            &fable_text,
+            fable_active,
             show_claude_code,
             show_codex,
             show_antigravity,
@@ -3651,6 +3781,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
             &minimax_accent,
             &cursor_accent,
             &ollama_accent,
+            &fable_accent,
         );
 
         let _ = BitBlt(hdc, 0, 0, width, height, mem_dc, 0, 0, SRCCOPY);
@@ -3693,6 +3824,8 @@ fn draw_row(
     cursor_accent: &Color,
     ollama_accent: &Color,
     track: &Color,
+    fable: Option<(f64, &str, &Color)>,
+    fable_label: Option<&str>,
 ) {
     let seg_h = sc(SEGMENT_H);
     let active_models =
@@ -3729,6 +3862,9 @@ fn draw_row(
     } else {
         *text_color
     };
+    // The Fable value is always tinted so it is distinguishable from the
+    // adjacent weekly-all bar even when Claude Code is the only provider.
+    let fable_value_color = fable_usage_text_color(is_dark);
 
     unsafe {
         let _ = SetTextColor(hdc, COLORREF(text_color.to_colorref()));
@@ -3829,6 +3965,42 @@ fn draw_row(
                 track,
                 &ollama_value_color,
             );
+            model_x += model_usage_width(segment_count) + sc(MODEL_RIGHT_MARGIN);
+        }
+        // The Fable weekly meter is appended after all provider columns so the
+        // shared session/weekly columns stay aligned across both rows.
+        if show_claude_code {
+            if let Some((fable_percent, fable_text, fable_accent)) = fable {
+                draw_usage_bar(
+                    hdc,
+                    model_x,
+                    y,
+                    segment_count,
+                    fable_percent,
+                    fable_text,
+                    fable_accent,
+                    track,
+                    &fable_value_color,
+                );
+            }
+            // Heading above the Fable bar (drawn in the session row), tinted to
+            // match the bar so it is clearly the Fable column.
+            if let Some(label) = fable_label {
+                let _ = SetTextColor(hdc, COLORREF(fable_value_color.to_colorref()));
+                let mut label_wide: Vec<u16> = label.encode_utf16().collect();
+                let mut label_rect = RECT {
+                    left: model_x,
+                    top: y,
+                    right: model_x + model_usage_width(segment_count),
+                    bottom: y + seg_h,
+                };
+                let _ = DrawTextW(
+                    hdc,
+                    &mut label_wide,
+                    &mut label_rect,
+                    DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+                );
+            }
         }
     }
 }
