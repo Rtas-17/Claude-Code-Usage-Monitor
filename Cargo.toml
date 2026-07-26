@@ -32,6 +32,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "6"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
+regex = "1"
 
 [features]
 # Pulls in wry + tao for an embedded WebView2 login window. Off by default

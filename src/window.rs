@@ -79,6 +79,11 @@ struct AppState {
     ollama_session_text: String,
     ollama_weekly_percent: f64,
     ollama_weekly_text: String,
+    opencode_session_percent: f64,
+    opencode_session_text: String,
+    opencode_weekly_percent: f64,
+    opencode_weekly_text: String,
+    opencode_weekly_label: &'static str,
     fable_percent: f64,
     fable_text: String,
     fable_active: bool,
@@ -88,6 +93,7 @@ struct AppState {
     show_minimax: bool,
     show_cursor: bool,
     show_ollama: bool,
+    show_opencode: bool,
     show_fable: bool,
 
     data: Option<AppUsageData>,
@@ -157,6 +163,7 @@ const IDM_MODEL_OLLAMA: u16 = 64;
 #[cfg(feature = "ollama-login-webview")]
 const IDM_LOGIN_OLLAMA: u16 = 65;
 const IDM_MODEL_FABLE: u16 = 67;
+const IDM_MODEL_OPENCODE: u16 = 68;
 
 const WM_DPICHANGED_MSG: u32 = 0x02E0;
 const WM_APP_UPDATE_CHECK_COMPLETE: u32 = WM_APP + 2;
@@ -348,6 +355,8 @@ struct SettingsFile {
     show_cursor: bool,
     #[serde(default = "default_show_ollama")]
     show_ollama: bool,
+    #[serde(default = "default_show_opencode")]
+    show_opencode: bool,
     #[serde(default = "default_show_fable")]
     show_fable: bool,
 }
@@ -367,6 +376,7 @@ impl Default for SettingsFile {
             show_minimax: false,
             show_cursor: false,
             show_ollama: false,
+            show_opencode: false,
             show_fable: true,
         }
     }
@@ -404,6 +414,10 @@ fn default_show_ollama() -> bool {
     false
 }
 
+fn default_show_opencode() -> bool {
+    false
+}
+
 fn default_show_fable() -> bool {
     true
 }
@@ -420,6 +434,7 @@ fn load_settings() -> SettingsFile {
         && !settings.show_minimax
         && !settings.show_cursor
         && !settings.show_ollama
+        && !settings.show_opencode
     {
         settings.show_claude_code = true;
     }
@@ -454,6 +469,7 @@ fn save_state_settings() {
             show_minimax: s.show_minimax,
             show_cursor: s.show_cursor,
             show_ollama: s.show_ollama,
+            show_opencode: s.show_opencode,
             show_fable: s.show_fable,
         });
     }
@@ -542,6 +558,19 @@ fn tray_icon_data_from_state() -> Vec<tray_icon::TrayIconData> {
                     ),
                 });
             }
+            if s.show_opencode {
+                icons.push(tray_icon::TrayIconData {
+                    kind: tray_icon::TrayIconKind::Opencode,
+                    percent: Some(s.opencode_session_percent),
+                    tooltip: format!(
+                        "{} 5h: {} | {}: {}",
+                        s.language.strings().opencode_model,
+                        s.opencode_session_text,
+                        s.opencode_weekly_label,
+                        s.opencode_weekly_text
+                    ),
+                });
+            }
             icons
         }
         Some(s) => {
@@ -586,6 +615,13 @@ fn tray_icon_data_from_state() -> Vec<tray_icon::TrayIconData> {
                     kind: tray_icon::TrayIconKind::Antigravity,
                     percent: None,
                     tooltip: s.language.strings().ollama_window_title.to_string(),
+                });
+            }
+            if s.show_opencode {
+                icons.push(tray_icon::TrayIconData {
+                    kind: tray_icon::TrayIconKind::Opencode,
+                    percent: None,
+                    tooltip: s.language.strings().opencode_window_title.to_string(),
                 });
             }
             icons
@@ -835,6 +871,22 @@ fn refresh_usage_texts(state: &mut AppState) {
     } else if state.show_ollama {
         state.ollama_session_text = "!".to_string();
         state.ollama_weekly_text = "!".to_string();
+    }
+
+    if let Some(opencode) = data.opencode.as_ref() {
+        state.opencode_session_text = poller::format_line(&opencode.session, strings);
+        let label = opencode.weekly_label.unwrap_or(strings.weekly_window);
+        state.opencode_weekly_label = label;
+        let inner = poller::format_line(&opencode.weekly, strings);
+        state.opencode_weekly_text = if label == strings.weekly_window {
+            inner
+        } else {
+            format!("{label} {inner}")
+        };
+    } else if state.show_opencode {
+        state.opencode_session_text = "!".to_string();
+        state.opencode_weekly_text = "!".to_string();
+        state.opencode_weekly_label = strings.weekly_window;
     }
 }
 
@@ -1250,13 +1302,15 @@ fn active_model_count(
     show_minimax: bool,
     show_cursor: bool,
     show_ollama: bool,
+    show_opencode: bool,
 ) -> i32 {
     (show_claude_code as i32
         + show_codex as i32
         + show_antigravity as i32
         + show_minimax as i32
         + show_cursor as i32
-        + show_ollama as i32)
+        + show_ollama as i32
+        + show_opencode as i32)
         .max(1)
 }
 
@@ -1301,6 +1355,7 @@ fn total_widget_width_for_state(state: &AppState) -> i32 {
             state.show_minimax,
             state.show_cursor,
             state.show_ollama,
+            state.show_opencode,
         ),
         state.fable_active && state.show_claude_code && state.show_fable,
     )
@@ -1320,6 +1375,7 @@ fn total_widget_width() -> i32 {
                         s.show_minimax,
                         s.show_cursor,
                         s.show_ollama,
+                        s.show_opencode,
                     ),
                     s.fable_active && s.show_claude_code && s.show_fable,
                 )
@@ -1360,6 +1416,10 @@ fn cursor_accent_color(is_dark: bool) -> Color {
 
 fn ollama_accent_color() -> Color {
     Color::from_hex("#676BEC")
+}
+
+fn opencode_accent_color() -> Color {
+    Color::from_hex("#2EBD85")
 }
 
 /// Distinct accent for the Fable weekly meter — a muted violet that reads on
@@ -1422,6 +1482,14 @@ fn ollama_usage_text_color(is_dark: bool) -> Color {
         Color::from_hex("#9398F5")
     } else {
         Color::from_hex("#4848B8")
+    }
+}
+
+fn opencode_usage_text_color(is_dark: bool) -> Color {
+    if is_dark {
+        Color::from_hex("#5DD6A1")
+    } else {
+        Color::from_hex("#1F8A5C")
     }
 }
 
@@ -1507,6 +1575,7 @@ pub fn run() {
             settings.show_minimax,
             settings.show_cursor,
             settings.show_ollama,
+            settings.show_opencode,
         );
         let hwnd = CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
@@ -1582,6 +1651,11 @@ pub fn run() {
                 ollama_session_text: "--".to_string(),
                 ollama_weekly_percent: 0.0,
                 ollama_weekly_text: "--".to_string(),
+                opencode_session_percent: 0.0,
+                opencode_session_text: "--".to_string(),
+                opencode_weekly_percent: 0.0,
+                opencode_weekly_text: "--".to_string(),
+                opencode_weekly_label: language.strings().weekly_window,
                 fable_percent: 0.0,
                 fable_text: "--".to_string(),
                 fable_active: false,
@@ -1591,6 +1665,7 @@ pub fn run() {
                 show_minimax: settings.show_minimax,
                 show_cursor: settings.show_cursor,
                 show_ollama: settings.show_ollama,
+                show_opencode: settings.show_opencode,
                 show_fable: settings.show_fable,
                 data: None,
                 poll_interval_ms: settings.poll_interval_ms,
@@ -1726,6 +1801,10 @@ fn render_layered() {
         ollama_session_text,
         ollama_weekly_pct,
         ollama_weekly_text,
+        opencode_session_pct,
+        opencode_session_text,
+        opencode_weekly_pct,
+        opencode_weekly_text,
         fable_pct,
         fable_text,
         fable_active,
@@ -1735,6 +1814,7 @@ fn render_layered() {
         show_minimax,
         show_cursor,
         show_ollama,
+        show_opencode,
     ) = {
         let state = lock_state();
         match state.as_ref() {
@@ -1767,6 +1847,10 @@ fn render_layered() {
                 s.ollama_session_text.clone(),
                 s.ollama_weekly_percent,
                 s.ollama_weekly_text.clone(),
+                s.opencode_session_percent,
+                s.opencode_session_text.clone(),
+                s.opencode_weekly_percent,
+                s.opencode_weekly_text.clone(),
                 s.fable_percent,
                 s.fable_text.clone(),
                 s.fable_active && s.show_fable,
@@ -1776,6 +1860,7 @@ fn render_layered() {
                 s.show_minimax,
                 s.show_cursor,
                 s.show_ollama,
+                s.show_opencode,
             ),
             None => return,
         }
@@ -1800,6 +1885,7 @@ fn render_layered() {
     let minimax_accent = minimax_accent_color();
     let cursor_accent = cursor_accent_color(is_dark);
     let ollama_accent = ollama_accent_color();
+    let opencode_accent = opencode_accent_color();
     let fable_accent = fable_accent_color();
     let track = if is_dark {
         Color::from_hex("#444444")
@@ -1884,6 +1970,10 @@ fn render_layered() {
             &ollama_session_text,
             ollama_weekly_pct,
             &ollama_weekly_text,
+            opencode_session_pct,
+            &opencode_session_text,
+            opencode_weekly_pct,
+            &opencode_weekly_text,
             fable_pct,
             &fable_text,
             fable_active,
@@ -1893,11 +1983,13 @@ fn render_layered() {
             show_minimax,
             show_cursor,
             show_ollama,
+            show_opencode,
             &codex_accent,
             &antigravity_accent,
             &minimax_accent,
             &cursor_accent,
             &ollama_accent,
+            &opencode_accent,
             &fable_accent,
         );
 
@@ -1982,6 +2074,10 @@ fn paint_content(
     ollama_session_text: &str,
     ollama_weekly_pct: f64,
     ollama_weekly_text: &str,
+    opencode_session_pct: f64,
+    opencode_session_text: &str,
+    opencode_weekly_pct: f64,
+    opencode_weekly_text: &str,
     fable_pct: f64,
     fable_text: &str,
     fable_active: bool,
@@ -1991,11 +2087,13 @@ fn paint_content(
     show_minimax: bool,
     show_cursor: bool,
     show_ollama: bool,
+    show_opencode: bool,
     codex_accent: &Color,
     antigravity_accent: &Color,
     minimax_accent: &Color,
     cursor_accent: &Color,
     ollama_accent: &Color,
+    opencode_accent: &Color,
     fable_accent: &Color,
 ) {
     unsafe {
@@ -2077,7 +2175,8 @@ fn paint_content(
             || show_codex
             || show_antigravity
             || show_minimax
-            || show_ollama;
+            || show_ollama
+            || show_opencode;
         let (session_label, weekly_label) = if show_cursor && !classic_windows {
             (strings.cursor_auto_window, strings.cursor_api_window)
         } else {
@@ -2112,18 +2211,22 @@ fn paint_content(
             cursor_session_text,
             ollama_session_pct,
             ollama_session_text,
+            opencode_session_pct,
+            opencode_session_text,
             show_claude_code,
             show_codex,
             show_antigravity,
             show_minimax,
             show_cursor,
             show_ollama,
+            show_opencode,
             accent,
             codex_accent,
             antigravity_accent,
             minimax_accent,
             cursor_accent,
             ollama_accent,
+            opencode_accent,
             track,
             // Session row has no Fable bar, only the heading label.
             None,
@@ -2148,18 +2251,22 @@ fn paint_content(
             cursor_weekly_text,
             ollama_weekly_pct,
             ollama_weekly_text,
+            opencode_weekly_pct,
+            opencode_weekly_text,
             show_claude_code,
             show_codex,
             show_antigravity,
             show_minimax,
             show_cursor,
             show_ollama,
+            show_opencode,
             accent,
             codex_accent,
             antigravity_accent,
             minimax_accent,
             cursor_accent,
             ollama_accent,
+            opencode_accent,
             track,
             fable_bar,
             // Weekly row draws the Fable bar itself, no separate heading.
@@ -2180,6 +2287,7 @@ fn do_poll(send_hwnd: SendHwnd) {
         show_minimax,
         show_cursor,
         show_ollama,
+        show_opencode,
     ) = {
         let state = lock_state();
         state
@@ -2191,11 +2299,20 @@ fn do_poll(send_hwnd: SendHwnd) {
                 s.show_minimax,
                 s.show_cursor,
                 s.show_ollama,
+                s.show_opencode,
             ))
-            .unwrap_or((true, false, false, false, false, false))
+            .unwrap_or((true, false, false, false, false, false, false))
     };
 
-    match poller::poll(show_claude_code, show_codex, show_antigravity, show_minimax, show_cursor, show_ollama) {
+    match poller::poll(
+        show_claude_code,
+        show_codex,
+        show_antigravity,
+        show_minimax,
+        show_cursor,
+        show_ollama,
+        show_opencode,
+    ) {
         Ok(data) => {
             let mut state = lock_state();
             if let Some(s) = state.as_mut() {
@@ -2248,6 +2365,13 @@ fn do_poll(send_hwnd: SendHwnd) {
                     s.ollama_session_percent = 0.0;
                     s.ollama_weekly_percent = 0.0;
                 }
+                if let Some(opencode) = data.opencode.as_ref() {
+                    s.opencode_session_percent = opencode.session.percentage;
+                    s.opencode_weekly_percent = opencode.weekly.percentage;
+                } else if s.show_opencode {
+                    s.opencode_session_percent = 0.0;
+                    s.opencode_weekly_percent = 0.0;
+                }
                 // Stop fast-poll if reset data is now fresh
                 if !poller::app_is_past_reset(&data) {
                     unsafe {
@@ -2285,11 +2409,26 @@ fn do_poll(send_hwnd: SendHwnd) {
                         && !show_codex
                         && !show_minimax
                         && !show_cursor
-                        && !show_ollama =>
+                        && !show_ollama
+                        && !show_opencode =>
                 {
                     Some((
                         poller::CredentialWatchMode::Antigravity,
                         poller::credential_watch_snapshot(poller::CredentialWatchMode::Antigravity),
+                    ))
+                }
+                poller::PollError::AuthRequired | poller::PollError::TokenExpired
+                    if show_opencode
+                        && !show_claude_code
+                        && !show_codex
+                        && !show_antigravity
+                        && !show_minimax
+                        && !show_cursor
+                        && !show_ollama =>
+                {
+                    Some((
+                        poller::CredentialWatchMode::Opencode,
+                        poller::credential_watch_snapshot(poller::CredentialWatchMode::Opencode),
                     ))
                 }
                 poller::PollError::AuthRequired | poller::PollError::TokenExpired => Some((
@@ -2330,6 +2469,9 @@ fn do_poll(send_hwnd: SendHwnd) {
                             s.cursor_weekly_text = "!".to_string();
                             s.ollama_session_text = "!".to_string();
                             s.ollama_weekly_text = "!".to_string();
+                            s.opencode_session_text = "!".to_string();
+                            s.opencode_weekly_text = "!".to_string();
+                            s.opencode_weekly_label = s.language.strings().weekly_window;
                             s.retry_count = s.retry_count.saturating_add(1);
                             unsafe {
                                 let _ = KillTimer(hwnd, TIMER_POLL);
@@ -2356,6 +2498,9 @@ fn do_poll(send_hwnd: SendHwnd) {
                             s.cursor_weekly_text = "...".to_string();
                             s.ollama_session_text = "...".to_string();
                             s.ollama_weekly_text = "...".to_string();
+                            s.opencode_session_text = "...".to_string();
+                            s.opencode_weekly_text = "...".to_string();
+                            s.opencode_weekly_label = s.language.strings().weekly_window;
                             s.retry_count = s.retry_count.saturating_add(1);
                             let backoff = RETRY_BASE_MS.saturating_mul(
                                 1u32.checked_shl(s.retry_count - 1).unwrap_or(u32::MAX),
@@ -2388,6 +2533,20 @@ fn do_poll(send_hwnd: SendHwnd) {
                                 tray_icon::TrayIconKind::Codex,
                                 s.language.strings().codex_token_expired_title,
                                 s.language.strings().codex_token_expired_body,
+                            )
+                        } else if s.show_antigravity {
+                            (
+                                s.language.strings(),
+                                tray_icon::TrayIconKind::Antigravity,
+                                s.language.strings().antigravity_token_expired_title,
+                                s.language.strings().antigravity_token_expired_body,
+                            )
+                        } else if s.show_opencode {
+                            (
+                                s.language.strings(),
+                                tray_icon::TrayIconKind::Opencode,
+                                s.language.strings().opencode_token_expired_title,
+                                s.language.strings().opencode_token_expired_body,
                             )
                         } else {
                             (
@@ -2456,6 +2615,12 @@ fn schedule_countdown_timer() {
             .as_ref()
             .and_then(|usage| poller::time_until_display_change(usage.session.resets_at)),
         data.antigravity
+            .as_ref()
+            .and_then(|usage| poller::time_until_display_change(usage.weekly.resets_at)),
+        data.opencode
+            .as_ref()
+            .and_then(|usage| poller::time_until_display_change(usage.session.resets_at)),
+        data.opencode
             .as_ref()
             .and_then(|usage| poller::time_until_display_change(usage.weekly.resets_at)),
     ];
@@ -2987,6 +3152,9 @@ unsafe extern "system" fn wnd_proc(
                             s.weekly_text = "...".to_string();
                             s.codex_session_text = "...".to_string();
                             s.codex_weekly_text = "...".to_string();
+                            s.opencode_session_text = "...".to_string();
+                            s.opencode_weekly_text = "...".to_string();
+                            s.opencode_weekly_label = s.language.strings().weekly_window;
                             s.force_notify_auth_error = true;
                         }
                     }
@@ -3075,6 +3243,7 @@ unsafe extern "system" fn wnd_proc(
                 | IDM_MODEL_MINIMAX
                 | IDM_MODEL_CURSOR
                 | IDM_MODEL_OLLAMA
+                | IDM_MODEL_OPENCODE
                 | IDM_MODEL_FABLE => {
                     {
                         let mut state = lock_state();
@@ -3086,6 +3255,7 @@ unsafe extern "system" fn wnd_proc(
                                         || s.show_minimax
                                         || s.show_cursor
                                         || s.show_ollama
+                                        || s.show_opencode
                                         || !s.show_claude_code
                                     {
                                         s.show_claude_code = !s.show_claude_code;
@@ -3097,6 +3267,7 @@ unsafe extern "system" fn wnd_proc(
                                         || s.show_minimax
                                         || s.show_cursor
                                         || s.show_ollama
+                                        || s.show_opencode
                                         || !s.show_codex
                                     {
                                         s.show_codex = !s.show_codex;
@@ -3108,6 +3279,7 @@ unsafe extern "system" fn wnd_proc(
                                         || s.show_minimax
                                         || s.show_cursor
                                         || s.show_ollama
+                                        || s.show_opencode
                                         || !s.show_antigravity
                                     {
                                         s.show_antigravity = !s.show_antigravity;
@@ -3119,6 +3291,7 @@ unsafe extern "system" fn wnd_proc(
                                         || s.show_antigravity
                                         || s.show_cursor
                                         || s.show_ollama
+                                        || s.show_opencode
                                         || !s.show_minimax
                                     {
                                         s.show_minimax = !s.show_minimax;
@@ -3130,6 +3303,7 @@ unsafe extern "system" fn wnd_proc(
                                         || s.show_antigravity
                                         || s.show_minimax
                                         || s.show_ollama
+                                        || s.show_opencode
                                         || !s.show_cursor
                                     {
                                         s.show_cursor = !s.show_cursor;
@@ -3141,9 +3315,22 @@ unsafe extern "system" fn wnd_proc(
                                         || s.show_antigravity
                                         || s.show_minimax
                                         || s.show_cursor
+                                        || s.show_opencode
                                         || !s.show_ollama
                                     {
                                         s.show_ollama = !s.show_ollama;
+                                    }
+                                }
+                                IDM_MODEL_OPENCODE => {
+                                    if s.show_claude_code
+                                        || s.show_codex
+                                        || s.show_antigravity
+                                        || s.show_minimax
+                                        || s.show_cursor
+                                        || s.show_ollama
+                                        || !s.show_opencode
+                                    {
+                                        s.show_opencode = !s.show_opencode;
                                     }
                                 }
                                 // The Fable meter is an optional extra bar; it can
@@ -3166,6 +3353,9 @@ unsafe extern "system" fn wnd_proc(
                             s.cursor_weekly_text = "...".to_string();
                             s.ollama_session_text = "...".to_string();
                             s.ollama_weekly_text = "...".to_string();
+                            s.opencode_session_text = "...".to_string();
+                            s.opencode_weekly_text = "...".to_string();
+                            s.opencode_weekly_label = s.language.strings().weekly_window;
                         }
                     }
                     save_state_settings();
@@ -3277,6 +3467,7 @@ fn show_context_menu(hwnd: HWND) {
             show_minimax,
             show_cursor,
             show_ollama,
+            show_opencode,
             show_fable,
         ) = {
             let state = lock_state();
@@ -3295,6 +3486,7 @@ fn show_context_menu(hwnd: HWND) {
                     s.show_minimax,
                     s.show_cursor,
                     s.show_ollama,
+                    s.show_opencode,
                     s.show_fable,
                 ),
                 None => (
@@ -3306,6 +3498,7 @@ fn show_context_menu(hwnd: HWND) {
                     UpdateStatus::Idle,
                     true,
                     true,
+                    false,
                     false,
                     false,
                     false,
@@ -3435,6 +3628,19 @@ fn show_context_menu(hwnd: HWND) {
             ollama_flags,
             IDM_MODEL_OLLAMA as usize,
             PCWSTR::from_raw(ollama_model.as_ptr()),
+        );
+
+        let opencode_model = native_interop::wide_str(strings.opencode_model);
+        let opencode_flags = if show_opencode {
+            MF_CHECKED
+        } else {
+            MENU_ITEM_FLAGS(0)
+        };
+        let _ = AppendMenuW(
+            models_menu,
+            opencode_flags,
+            IDM_MODEL_OPENCODE as usize,
+            PCWSTR::from_raw(opencode_model.as_ptr()),
         );
 
         // Fable is a Claude Code sub-meter, so its toggle is only meaningful
@@ -3643,6 +3849,10 @@ fn paint(hdc: HDC, hwnd: HWND) {
         ollama_session_text,
         ollama_weekly_pct,
         ollama_weekly_text,
+        opencode_session_pct,
+        opencode_session_text,
+        opencode_weekly_pct,
+        opencode_weekly_text,
         fable_pct,
         fable_text,
         fable_active,
@@ -3652,6 +3862,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
         show_minimax,
         show_cursor,
         show_ollama,
+        show_opencode,
     ) = {
         let state = lock_state();
         match state.as_ref() {
@@ -3682,6 +3893,10 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.ollama_session_text.clone(),
                 s.ollama_weekly_percent,
                 s.ollama_weekly_text.clone(),
+                s.opencode_session_percent,
+                s.opencode_session_text.clone(),
+                s.opencode_weekly_percent,
+                s.opencode_weekly_text.clone(),
                 s.fable_percent,
                 s.fable_text.clone(),
                 s.fable_active && s.show_fable,
@@ -3691,6 +3906,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
                 s.show_minimax,
                 s.show_cursor,
                 s.show_ollama,
+                s.show_opencode,
             ),
             None => return,
         }
@@ -3702,6 +3918,7 @@ fn paint(hdc: HDC, hwnd: HWND) {
     let minimax_accent = minimax_accent_color();
     let cursor_accent = cursor_accent_color(is_dark);
     let ollama_accent = ollama_accent_color();
+    let opencode_accent = opencode_accent_color();
     let fable_accent = fable_accent_color();
     let track = if is_dark {
         Color::from_hex("#444444")
@@ -3767,6 +3984,10 @@ fn paint(hdc: HDC, hwnd: HWND) {
             &ollama_session_text,
             ollama_weekly_pct,
             &ollama_weekly_text,
+            opencode_session_pct,
+            &opencode_session_text,
+            opencode_weekly_pct,
+            &opencode_weekly_text,
             fable_pct,
             &fable_text,
             fable_active,
@@ -3776,11 +3997,13 @@ fn paint(hdc: HDC, hwnd: HWND) {
             show_minimax,
             show_cursor,
             show_ollama,
+            show_opencode,
             &codex_accent,
             &antigravity_accent,
             &minimax_accent,
             &cursor_accent,
             &ollama_accent,
+            &opencode_accent,
             &fable_accent,
         );
 
@@ -3811,25 +4034,29 @@ fn draw_row(
     cursor_text: &str,
     ollama_percent: f64,
     ollama_text: &str,
+    opencode_percent: f64,
+    opencode_text: &str,
     show_claude_code: bool,
     show_codex: bool,
     show_antigravity: bool,
     show_minimax: bool,
     show_cursor: bool,
     show_ollama: bool,
+    show_opencode: bool,
     claude_accent: &Color,
     codex_accent: &Color,
     antigravity_accent: &Color,
     minimax_accent: &Color,
     cursor_accent: &Color,
     ollama_accent: &Color,
+    opencode_accent: &Color,
     track: &Color,
     fable: Option<(f64, &str, &Color)>,
     fable_label: Option<&str>,
 ) {
     let seg_h = sc(SEGMENT_H);
     let active_models =
-        active_model_count(show_claude_code, show_codex, show_antigravity, show_minimax, show_cursor, show_ollama);
+        active_model_count(show_claude_code, show_codex, show_antigravity, show_minimax, show_cursor, show_ollama, show_opencode);
     let segment_count = row_bar_segment_count(active_models);
     let use_model_text_colors = active_models > 1;
     let claude_value_color = if use_model_text_colors {
@@ -3859,6 +4086,11 @@ fn draw_row(
     };
     let ollama_value_color = if use_model_text_colors {
         ollama_usage_text_color(is_dark)
+    } else {
+        *text_color
+    };
+    let opencode_value_color = if use_model_text_colors {
+        opencode_usage_text_color(is_dark)
     } else {
         *text_color
     };
@@ -3964,6 +4196,20 @@ fn draw_row(
                 ollama_accent,
                 track,
                 &ollama_value_color,
+            );
+            model_x += model_usage_width(segment_count) + sc(MODEL_RIGHT_MARGIN);
+        }
+        if show_opencode {
+            draw_usage_bar(
+                hdc,
+                model_x,
+                y,
+                segment_count,
+                opencode_percent,
+                opencode_text,
+                opencode_accent,
+                track,
+                &opencode_value_color,
             );
             model_x += model_usage_width(segment_count) + sc(MODEL_RIGHT_MARGIN);
         }

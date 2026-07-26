@@ -13,6 +13,9 @@ pub struct UsageData {
     /// Weekly, model-scoped usage for Fable (Claude Code only). Present only
     /// when the usage endpoint reports a Fable-scoped weekly limit.
     pub fable: Option<UsageSection>,
+    /// Label for the weekly section when it can represent more than one
+    /// window (e.g. OpenCode picks whichever of 7d/30d is more used).
+    pub weekly_label: Option<&'static str>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -24,4 +27,5 @@ pub struct AppUsageData {
     /// Cursor plan usage. Auto maps to `session`, API maps to `weekly`.
     pub cursor: Option<UsageData>,
     pub ollama: Option<UsageData>,
+    pub opencode: Option<UsageData>,
 }
