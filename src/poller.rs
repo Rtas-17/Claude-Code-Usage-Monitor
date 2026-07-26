@@ -3078,6 +3078,30 @@ mod tests {
     }
 
     #[test]
+    fn opencode_failure_does_not_block_codex_when_both_are_enabled() {
+        let data = poll_with(
+            false,
+            true,
+            false,
+            false,
+            false,
+            false,
+            true,
+            || unreachable!("claude code is disabled"),
+            || Ok(usage_with_session_percent(42.0)),
+            || unreachable!("antigravity is disabled"),
+            || unreachable!("minimax is disabled"),
+            || unreachable!("cursor is disabled"),
+            || unreachable!("ollama is disabled"),
+            || Err(PollError::NoCredentials),
+        )
+        .expect("codex data should keep the poll successful");
+
+        assert!(data.opencode.is_none());
+        assert_eq!(data.codex.unwrap().session.percentage, 42.0);
+    }
+
+    #[test]
     fn extracts_fable_weekly_scoped_limit() {
         let response: UsageResponse = serde_json::from_str(
             r#"{
